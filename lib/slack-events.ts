@@ -26,6 +26,17 @@ interface SlackReactionEvent {
   }
 }
 
+// Import the SSE broadcast function
+async function broadcastToSSE(tenantId: string, type: string, data?: Record<string, unknown>) {
+  try {
+    // Dynamic import to avoid circular dependencies
+    const { broadcastConversationUpdate } = await import('../app/api/[tenantId]/conversations/stream/route')
+    broadcastConversationUpdate(tenantId, { type, ...(data || {}) })
+  } catch (error) {
+    console.error('Failed to broadcast SSE update:', error)
+  }
+}
+
 export async function verifySlackSignature(
   body: string,
   timestamp: string | null,
@@ -129,6 +140,17 @@ export async function processMessageEvent(tenantId: string, event: SlackEvent) {
     console.log('💾 Saving to database...')
     await conversationRepository.save(conversation)
     console.log(`✅ Successfully saved message ${event.ts} for tenant ${tenantId}`)
+
+    // Broadcast real-time update
+    console.log('📡 Broadcasting real-time update...')
+    await broadcastToSSE(tenantId, 'new_message', {
+      conversationId: conversation.id,
+      channelId: conversation.channelId,
+      channelName: conversation.channelName,
+      content: conversation.content,
+      userName: conversation.userName,
+      timestamp: conversation.slackTimestamp.toISOString()
+    })
   } catch (error) {
     console.error('💥 Error processing message event:', error)
     throw error
@@ -192,63 +214,86 @@ export async function processReactionEvent(tenantId: string, event: SlackReactio
     await conversationRepository.save(conversation)
     
     console.log(`Updated reactions for message ${event.item.ts} in tenant ${tenantId}`)
+
+    // Broadcast reaction update
+    await broadcastToSSE(tenantId, 'reaction_update', {
+      conversationId: conversation.id,
+      reaction: event.reaction,
+      isRemoval,
+      user: event.user
+    })
   } catch (error) {
     console.error('Error processing reaction event:', error)
   }
 }
 
+// Helper function to process thread reply events (creates separate conversation record)
 export async function processThreadReplyEvent(tenantId: string, event: SlackEvent) {
   try {
-    if (!event.thread_ts) {
-      return // Not a thread reply
-    }
-
     const dataSource = await initializeDatabase()
     const conversationRepository = dataSource.getRepository(Conversation)
-
+    
     // Find the parent conversation
     const parentConversation = await conversationRepository.findOne({
       where: { id: event.thread_ts, tenantId }
     })
 
     if (!parentConversation) {
-      console.log(`Parent conversation ${event.thread_ts} not found for thread reply`)
+      console.warn('Parent conversation not found for thread reply:', event.thread_ts)
       return
     }
 
-    // Get tenant context and resolve user information
-    const { tenant } = await getTenantContext(tenantId)
-    let userName: string | undefined
-    
-    if (tenant?.slackConfig?.botToken) {
-      const slackClient = await createSlackClient(tenant.slackConfig.botToken)
-      const slackUser = await getOrCreateSlackUser(tenantId, event.user, slackClient)
-      userName = slackUser?.realName || slackUser?.displayName || event.username
-    }
+    // Create thread reply as separate conversation record
+    const threadReplyConversation = conversationRepository.create({
+      id: event.ts,
+      tenantId,
+      channelId: event.channel,
+      channelName: parentConversation.channelName, // Use parent's channel name
+      content: event.text || '',
+      userId: event.user,
+      userName: event.user, // Will be updated when we get user info
+      threadTs: event.thread_ts, // This links it to the parent
+      slackTimestamp: new Date(parseFloat(event.ts) * 1000),
+      reactions: [],
+      threadReplies: []
+    })
 
-    // Add thread reply
+    await conversationRepository.save(threadReplyConversation)
+
+    // Add to parent conversation's threadReplies array
     const threadReply: SlackMessage = {
+      type: 'message',
       ts: event.ts,
       user: event.user,
       text: event.text || '',
-      type: event.type,
-      subtype: event.subtype,
       thread_ts: event.thread_ts
     }
 
-    const threadReplies = [...parentConversation.threadReplies]
+    const updatedThreadReplies = [...parentConversation.threadReplies]
     
     // Check if reply already exists
-    const existingReplyIndex = threadReplies.findIndex(r => r.ts === event.ts)
-    if (existingReplyIndex >= 0) {
-      return // Reply already processed
+    const existingReplyIndex = updatedThreadReplies.findIndex(r => r.ts === event.ts)
+    if (existingReplyIndex < 0) {
+      updatedThreadReplies.push(threadReply)
+      parentConversation.threadReplies = updatedThreadReplies
+      await conversationRepository.save(parentConversation)
     }
 
-    threadReplies.push(threadReply)
-    parentConversation.threadReplies = threadReplies
-    
-    await conversationRepository.save(parentConversation)
-    console.log(`Added thread reply ${event.ts} to conversation ${event.thread_ts} in tenant ${tenantId} (user: ${userName})`)
+    // Broadcast SSE update for the new thread reply
+    try {
+      const sseModule = await import('../app/api/[tenantId]/conversations/stream/route')
+      await sseModule.broadcastConversationUpdate(tenantId, {
+        type: 'new_thread_reply',
+        conversationId: threadReplyConversation.id,
+        parentConversationId: parentConversation.id,
+        content: event.text || '',
+        userName: event.user,
+        timestamp: threadReplyConversation.slackTimestamp.toISOString()
+      })
+    } catch (sseError) {
+      console.warn('Could not broadcast SSE update for thread reply:', sseError)
+    }
+
   } catch (error) {
     console.error('Error processing thread reply event:', error)
   }
