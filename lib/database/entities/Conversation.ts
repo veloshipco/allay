@@ -1,46 +1,31 @@
 import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm'
-import { Tenant } from './Tenant'
-
-export interface SlackReaction {
-  name: string
-  users: string[]
-  count: number
-}
-
-export interface SlackMessage {
-  ts: string
-  user: string
-  text: string
-  type: string
-  subtype?: string
-  thread_ts?: string
-}
+import type { ITenant, SlackReaction, SlackMessage } from './types'
 
 @Entity('conversations')
 export class Conversation {
-  @PrimaryColumn()
+  @PrimaryColumn({ type: 'varchar' })
   id!: string // Slack message TS
 
-  @Column()
+  @Column({ type: 'uuid' })
   tenantId!: string
 
-  @ManyToOne(() => Tenant, tenant => tenant.conversations)
+  @ManyToOne('Tenant', 'conversations')
   @JoinColumn({ name: 'tenantId' })
-  tenant!: Tenant
+  tenant!: ITenant
 
-  @Column()
+  @Column({ type: 'varchar' })
   channelId!: string
 
-  @Column()
+  @Column({ type: 'varchar', nullable: true })
   channelName?: string
 
-  @Column('text')
+  @Column({ type: 'text' })
   content!: string
 
-  @Column()
+  @Column({ type: 'varchar' })
   userId!: string
 
-  @Column()
+  @Column({ type: 'varchar', nullable: true })
   userName?: string
 
   @Column({ type: 'jsonb', default: [] })
@@ -49,7 +34,7 @@ export class Conversation {
   @Column({ type: 'jsonb', default: [] })
   threadReplies!: SlackMessage[]
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   threadTs?: string
 
   @Column({ type: 'timestamp' })
@@ -60,4 +45,7 @@ export class Conversation {
 
   @UpdateDateColumn()
   updatedAt!: Date
-} 
+}
+
+// Re-export the interfaces for backward compatibility
+export type { SlackReaction, SlackMessage } from './types' 

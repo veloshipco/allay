@@ -6,22 +6,22 @@ export class User {
   @PrimaryGeneratedColumn('uuid')
   id: string
 
-  @Column({ unique: true })
+  @Column({ type: 'varchar', unique: true })
   email: string
 
-  @Column()
+  @Column({ type: 'varchar' })
   password: string
 
-  @Column()
+  @Column({ type: 'varchar' })
   firstName: string
 
-  @Column()
+  @Column({ type: 'varchar' })
   lastName: string
 
-  @Column({ default: true })
+  @Column({ type: 'boolean', default: true })
   isActive: boolean
 
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   isEmailVerified: boolean
 
   @ManyToMany(() => Tenant)

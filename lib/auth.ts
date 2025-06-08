@@ -59,9 +59,10 @@ export const createSession = async (
   const expiresAt = new Date()
   expiresAt.setDate(expiresAt.getDate() + 7) // 7 days
 
+  // Create session without token first
   const session = sessionRepository.create({
     userId,
-    token: generateSessionToken(userId, ''), // Will update after saving
+    token: '', // Will update after getting the ID
     ipAddress,
     userAgent,
     expiresAt
@@ -69,10 +70,15 @@ export const createSession = async (
 
   const savedSession = await sessionRepository.save(session)
   
-  // Update token with actual session ID
-  savedSession.token = generateSessionToken(userId, savedSession.id)
-  await sessionRepository.save(savedSession)
+  // Now generate token with the actual session ID
+  const token = generateSessionToken(userId, savedSession.id)
+  savedSession.token = token
   
+  // Update the session with the correct token
+  await sessionRepository.update(savedSession.id, { token })
+  
+  // Return the session with the correct token
+  savedSession.token = token
   return savedSession
 }
 
@@ -221,4 +227,26 @@ export const setSessionCookie = async (sessionToken: string) => {
 export const clearSessionCookie = async () => {
   const cookieStore = await cookies()
   cookieStore.delete(SESSION_COOKIE_NAME)
+}
+
+export const getUserTenants = async (userId: string) => {
+  try {
+    const dataSource = await initializeDatabase()
+    const userRepository = dataSource.getRepository(User)
+    
+    const user = await userRepository.findOne({
+      where: { id: userId, isActive: true },
+      relations: ['tenants']
+    })
+
+    if (!user) {
+      return { tenants: [], error: 'User not found' }
+    }
+
+    const activeTenants = user.tenants.filter(tenant => tenant.isActive)
+    return { tenants: activeTenants, error: null }
+  } catch (error) {
+    console.error('Error getting user tenants:', error)
+    return { tenants: [], error: 'Failed to get user tenants' }
+  }
 } 

@@ -1,15 +1,15 @@
 import { Entity, PrimaryGeneratedColumn, Column, OneToMany, CreateDateColumn, UpdateDateColumn } from 'typeorm'
-import { Conversation } from './Conversation'
+import type { IConversation } from './types'
 
 @Entity('tenants')
 export class Tenant {
   @PrimaryGeneratedColumn('uuid')
   id: string
 
-  @Column()
+  @Column({ type: 'varchar' })
   name: string
 
-  @Column({ unique: true })
+  @Column({ type: 'varchar', unique: true })
   slug: string
 
   @Column({ type: 'jsonb', nullable: true })
@@ -21,7 +21,7 @@ export class Tenant {
     installedBy?: string
   }
 
-  @Column({ default: true })
+  @Column({ type: 'boolean', default: true })
   isActive: boolean
 
   @CreateDateColumn()
@@ -30,6 +30,6 @@ export class Tenant {
   @UpdateDateColumn()
   updatedAt: Date
 
-  @OneToMany(() => Conversation, conversation => conversation.tenant)
-  conversations: Conversation[]
+  @OneToMany('Conversation', 'tenant')
+  conversations: IConversation[]
 } 

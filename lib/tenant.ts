@@ -3,6 +3,13 @@ import { Tenant } from './database/entities/Tenant'
 
 export const getTenantContext = async (tenantId: string) => {
   try {
+    // Validate UUID format before querying database
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidPattern.test(tenantId)) {
+      console.log(`Invalid tenant ID format: ${tenantId}`)
+      return { tenant: null, error: new Error('Invalid tenant ID format') }
+    }
+
     const dataSource = await initializeDatabase()
     const tenantRepository = dataSource.getRepository(Tenant)
     

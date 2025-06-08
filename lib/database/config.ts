@@ -3,6 +3,10 @@ import { Tenant } from './entities/Tenant'
 import { Conversation } from './entities/Conversation'
 import { User } from './entities/User'
 import { Session } from './entities/Session'
+import dotenv from 'dotenv'
+
+dotenv.config({ path: '.env.local' })
+dotenv.config({ path: '.env' })
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -10,7 +14,8 @@ export const AppDataSource = new DataSource({
   port: parseInt(process.env.DATABASE_PORT || '5432'),
   username: process.env.DATABASE_USERNAME || 'postgres',
   password: process.env.DATABASE_PASSWORD || '',
-  database: process.env.DATABASE_NAME || 'allay',
+  database: process.env.DATABASE_NAME || 'postgres',
+  ssl: process.env.DATABASE_HOST?.includes('supabase.co') ? { rejectUnauthorized: false } : false,
   synchronize: process.env.NODE_ENV === 'development',
   logging: process.env.NODE_ENV === 'development',
   entities: [Tenant, Conversation, User, Session],

@@ -1,24 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { updateTenantSlackConfig } from '@/lib/tenant'
+import { config } from 'dotenv'
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ tenantId: string }> }
-) {
-  const { tenantId } = await params
+config({ path: '.env.local' })
+config({ path: '.env' })
+
+export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
-  const state = req.nextUrl.searchParams.get('state')
+  const state = req.nextUrl.searchParams.get('state') // This is the tenantId
   const error = req.nextUrl.searchParams.get('error')
-
-  // Verify state matches tenant ID for security
-  if (state !== tenantId) {
-    return new Response('Invalid state parameter', { status: 400 })
+  
+  console.log('🔄 Slack OAuth callback received')
+  console.log('📝 Callback parameters:', { 
+    code: code ? `${code.substring(0, 20)}...` : null, 
+    state, 
+    error,
+    fullUrl: req.url 
+  })
+  
+  if (!state) {
+    console.error('❌ Missing state parameter in callback')
+    return new Response('Missing state parameter', { status: 400 })
   }
+  
+  const tenantId = state
+  console.log('🏢 Processing OAuth for tenantId:', tenantId)
+  
+  // Use the ngrok URL as the base URL
+  const baseUrl = 'https://5b41-2409-408c-ae13-29bd-20bd-c182-3f13-f382.ngrok-free.app'
 
   if (error) {
     console.error('Slack OAuth error:', error)
     return NextResponse.redirect(
-      new URL(`/${tenantId}/integrations?error=${error}`, req.nextUrl.origin)
+      new URL(`/${tenantId}/integrations?error=${error}`, baseUrl)
     )
   }
 
@@ -36,7 +50,7 @@ export async function GET(
         client_id: process.env.SLACK_CLIENT_ID!,
         client_secret: process.env.SLACK_CLIENT_SECRET!,
         code: code,
-        redirect_uri: `${process.env.SLACK_REDIRECT_URI}/api/slack/callback`
+        redirect_uri: `${baseUrl}/api/slack/callback`
       })
     })
 
@@ -60,12 +74,12 @@ export async function GET(
     }
 
     return NextResponse.redirect(
-      new URL(`/${tenantId}/integrations?success=true`, req.nextUrl.origin)
+      new URL(`/${tenantId}/integrations?success=true`, baseUrl)
     )
   } catch (error) {
     console.error('Error processing Slack OAuth callback:', error)
     return NextResponse.redirect(
-      new URL(`/${tenantId}/integrations?error=oauth_failed`, req.nextUrl.origin)
+      new URL(`/${tenantId}/integrations?error=oauth_failed`, baseUrl)
     )
   }
 } 

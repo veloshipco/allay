@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantContext } from '@/lib/tenant'
-import { processMessageEvent, processReactionEvent, verifySlackSignature } from '@/lib/slack-events'
+import { processMessageEvent, processReactionEvent, processThreadReplyEvent, verifySlackSignature } from '@/lib/slack-events'
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { tenantId: string } }
+  { params }: { params: Promise<{ tenantId: string }> }
 ) {
   try {
+    const { tenantId } = await params
     const body = await req.text()
     const bodyData = JSON.parse(body)
     
@@ -16,7 +17,7 @@ export async function POST(
     }
 
     // Get tenant and validate Slack configuration
-    const { tenant } = await getTenantContext(params.tenantId)
+    const { tenant } = await getTenantContext(tenantId)
     if (!tenant || !tenant.slackConfig?.signingSecret) {
       return new Response('Tenant not configured for Slack', { status: 404 })
     }
@@ -38,18 +39,29 @@ export async function POST(
 
     // Process different event types
     if (bodyData.event) {
-      switch (bodyData.event.type) {
+      const event = bodyData.event
+      
+      switch (event.type) {
         case 'message':
-          await processMessageEvent(params.tenantId, bodyData.event)
+          // Check if this is a thread reply
+          if (event.thread_ts && event.thread_ts !== event.ts) {
+            await processThreadReplyEvent(tenantId, event)
+          } else {
+            // Regular message or thread parent
+            await processMessageEvent(tenantId, event)
+          }
           break
+          
         case 'reaction_added':
-          await processReactionEvent(params.tenantId, bodyData.event)
+          await processReactionEvent(tenantId, event)
           break
+          
         case 'reaction_removed':
-          await processReactionEvent(params.tenantId, bodyData.event, true)
+          await processReactionEvent(tenantId, event, true)
           break
+          
         default:
-          console.log(`Unhandled event type: ${bodyData.event.type}`)
+          console.log(`Unhandled event type: ${event.type}`)
       }
     }
 

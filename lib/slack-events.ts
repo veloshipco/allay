@@ -58,24 +58,31 @@ export async function verifySlackSignature(
 }
 
 export async function processMessageEvent(tenantId: string, event: SlackEvent) {
+  console.log('💾 processMessageEvent called:', { tenantId, eventTs: event.ts, channel: event.channel })
+  
   try {
     // Skip bot messages and message subtypes we don't want to store
     if (event.bot_id || event.subtype === 'bot_message') {
+      console.log('⏭️ Skipping bot message in processMessageEvent')
       return
     }
 
+    console.log('🔌 Connecting to database...')
     const dataSource = await initializeDatabase()
     const conversationRepository = dataSource.getRepository(Conversation)
 
+    console.log('🔍 Checking if conversation already exists...')
     // Check if conversation already exists
     const existingConversation = await conversationRepository.findOne({
       where: { id: event.ts, tenantId }
     })
 
     if (existingConversation) {
+      console.log('⚠️ Message already processed:', event.ts)
       return // Message already processed
     }
 
+    console.log('✨ Creating new conversation record...')
     // Create new conversation record
     const conversation = conversationRepository.create({
       id: event.ts,
@@ -91,10 +98,21 @@ export async function processMessageEvent(tenantId: string, event: SlackEvent) {
       threadReplies: []
     })
 
+    console.log('📝 Conversation object created:', {
+      id: conversation.id,
+      tenantId: conversation.tenantId,
+      channelId: conversation.channelId,
+      content: conversation.content
+    })
+
+    console.log('💾 Saving to database...')
     await conversationRepository.save(conversation)
-    console.log(`Saved message ${event.ts} for tenant ${tenantId}`)
+    console.log(`✅ Successfully saved message ${event.ts} for tenant ${tenantId}`)
   } catch (error) {
-    console.error('Error processing message event:', error)
+    console.error('💥 Error processing message event:', error)
+    if (error instanceof Error) {
+      console.error('Stack trace:', error.stack)
+    }
   }
 }
 

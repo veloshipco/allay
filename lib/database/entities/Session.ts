@@ -6,26 +6,26 @@ export class Session {
   @PrimaryGeneratedColumn('uuid')
   id: string
 
-  @Column()
+  @Column({ type: 'uuid' })
   userId: string
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'userId' })
   user: User
 
-  @Column()
+  @Column({ type: 'varchar' })
   token: string
 
-  @Column()
+  @Column({ type: 'varchar' })
   ipAddress: string
 
-  @Column()
+  @Column({ type: 'varchar' })
   userAgent: string
 
   @Column({ type: 'timestamp' })
   expiresAt: Date
 
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   isRevoked: boolean
 
   @CreateDateColumn()
