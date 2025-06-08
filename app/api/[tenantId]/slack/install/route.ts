@@ -49,13 +49,18 @@ export async function GET(
     'chat:write.customize'
   ]
 
+  // User scopes for user token acquisition (posts as actual users)
+  const userScopes = [
+    'chat:write'  // User scope for posting as the user without "via App" attribution
+  ]
+
   // Use the ngrok URL as the base URL
   const baseUrl = 'https://5b41-2409-408c-ae13-29bd-20bd-c182-3f13-f382.ngrok-free.app'
   const redirectUrl = new URL('/api/slack/callback', baseUrl)
 
   const url = `https://slack.com/oauth/v2/authorize?client_id=${
     process.env.SLACK_CLIENT_ID
-  }&scope=${scopes.join(',')}&redirect_uri=${encodeURIComponent(redirectUrl.toString())}&state=${encodeURIComponent(tenantId)}`
+  }&scope=${scopes.join(',')}&user_scope=${userScopes.join(',')}&redirect_uri=${encodeURIComponent(redirectUrl.toString())}&state=${encodeURIComponent(tenantId)}`
 
   console.log('🔗 Redirecting to Slack OAuth URL:', url)
   console.log('📝 Requested scopes:', scopes.join(', '))

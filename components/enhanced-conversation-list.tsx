@@ -4,10 +4,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { MessageSquare, Users, Clock, ThumbsUp, Reply, Send, Plus } from 'lucide-react'
 import { ConversationWithUser } from '@/lib/hooks/useConversations'
 import { useState, useEffect } from 'react'
 import React from 'react'
+
+interface AuthorizedUser {
+  id: string
+  slackUserId: string
+  realName?: string
+  displayName?: string
+  email?: string
+  profileImage?: string
+}
 
 interface EnhancedConversationListProps {
   conversations: ConversationWithUser[]
@@ -35,15 +45,18 @@ function ConversationReplyForm({
   conversationId, 
   channelId, 
   tenantId, 
-  onReplySuccess 
+  onReplySuccess,
+  authorizedUsers
 }: {
   conversationId: string
   channelId: string
   tenantId: string
   onReplySuccess: (replyData: { text: string, user: string, ts: string }) => void
+  authorizedUsers: AuthorizedUser[]
 }) {
   const [replyText, setReplyText] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<AuthorizedUser | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -58,7 +71,8 @@ function ConversationReplyForm({
           action: 'reply',
           channelId,
           messageText: replyText,
-          threadTs: conversationId
+          threadTs: conversationId,
+          ...(selectedUser && { asUserId: selectedUser.slackUserId })
         })
       })
 
@@ -74,7 +88,7 @@ function ConversationReplyForm({
               parentConversationId: conversationId,
               messageText: replyText,
               messageTs: result.messageTs,
-              userId: 'current_user', // You might want to get this from context
+              userId: selectedUser?.id || 'current_user',
               channelId: channelId
             })
           })
@@ -85,7 +99,7 @@ function ConversationReplyForm({
             // Create the reply data to pass back
             const replyData = {
               text: replyText,
-              user: 'current_user',
+              user: selectedUser?.id || 'current_user',
               ts: result.messageTs || Date.now().toString()
             }
             
@@ -97,7 +111,7 @@ function ConversationReplyForm({
             // Still show the reply in UI even if storage failed
             const replyData = {
               text: replyText,
-              user: 'current_user',
+              user: selectedUser?.id || 'current_user',
               ts: result.messageTs || Date.now().toString()
             }
             setReplyText('')
@@ -108,7 +122,7 @@ function ConversationReplyForm({
           // Still show the reply in UI even if storage failed
           const replyData = {
             text: replyText,
-            user: 'current_user',
+            user: selectedUser?.id || 'current_user',
             ts: result.messageTs || Date.now().toString()
           }
           setReplyText('')
@@ -127,6 +141,37 @@ function ConversationReplyForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
+      {authorizedUsers.length > 0 && (
+        <div className="flex items-center space-x-3">
+          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Reply as:</label>
+          <Select
+            value={selectedUser?.slackUserId || 'bot'}
+            onValueChange={(value) => {
+              const user = value === 'bot' ? null : authorizedUsers.find(u => u.slackUserId === value) || null
+              setSelectedUser(user)
+            }}
+          >
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Select user (optional)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="bot">
+                <span className="text-gray-500">Bot (default)</span>
+              </SelectItem>
+              {authorizedUsers.map((user) => (
+                <SelectItem key={user.slackUserId} value={user.slackUserId}>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs">
+                      {(user.displayName || user.realName || user.slackUserId).charAt(0).toUpperCase()}
+                    </div>
+                    <span>{user.displayName || user.realName || user.slackUserId}</span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <Textarea
         value={replyText}
         onChange={(e) => setReplyText(e.target.value)}
@@ -134,7 +179,13 @@ function ConversationReplyForm({
         className="min-h-[80px] resize-none"
         disabled={isSubmitting}
       />
-      <div className="flex justify-end">
+      <div className="flex justify-between items-center">
+        {authorizedUsers.length === 0 && (
+          <span className="text-xs text-gray-500">
+            Replies will be sent as bot. <a href={`/${tenantId}/users`} className="text-blue-600">Authorize users</a> to reply as them.
+          </span>
+        )}
+        <div className="flex-1" />
         <Button
           type="submit"
           size="sm"
@@ -159,12 +210,14 @@ function ConversationCard({
   conversation, 
   tenantId,
   onConversationUpdate,
-  onRefreshNeeded
+  onRefreshNeeded,
+  authorizedUsers
 }: { 
   conversation: ConversationWithUser
   tenantId: string
   onConversationUpdate?: (conversationId: string, updatedConversation: Partial<ConversationWithUser>) => void
   onRefreshNeeded?: () => void
+  authorizedUsers: AuthorizedUser[]
 }) {
   const [showReplyForm, setShowReplyForm] = useState(false)
   const [localThreadReplies, setLocalThreadReplies] = useState(conversation.threadReplies)
@@ -354,6 +407,7 @@ function ConversationCard({
               channelId={conversation.channelId}
               tenantId={tenantId}
               onReplySuccess={handleReplySuccess}
+              authorizedUsers={authorizedUsers}
             />
           </div>
         )}
@@ -365,6 +419,40 @@ function ConversationCard({
 export default function EnhancedConversationList({ conversations, tenantId, onRefreshNeeded }: EnhancedConversationListProps) {
   // Local state to track conversation updates
   const [localConversations, setLocalConversations] = useState(conversations)
+  const [authorizedUsers, setAuthorizedUsers] = useState<AuthorizedUser[]>([])
+  
+  // Fetch authorized users
+  useEffect(() => {
+    const fetchAuthorizedUsers = async () => {
+      try {
+        const response = await fetch(`/api/${tenantId}/slack/users`)
+        if (response.ok) {
+          const data = await response.json()
+          // Filter to only users with tokens
+          const authorized = (data.users || []).filter((user: { userToken?: string }) => user.userToken).map((user: {
+            id: string,
+            slackUserId: string,
+            realName?: string,
+            displayName?: string,
+            email?: string,
+            profileImage?: string
+          }) => ({
+            id: user.id,
+            slackUserId: user.slackUserId,
+            realName: user.realName,
+            displayName: user.displayName,
+            email: user.email,
+            profileImage: user.profileImage
+          }))
+          setAuthorizedUsers(authorized)
+        }
+      } catch (error) {
+        console.error('Failed to fetch authorized users:', error)
+      }
+    }
+
+    fetchAuthorizedUsers()
+  }, [tenantId])
   
   // Update local conversations when props change
   useEffect(() => {
@@ -454,6 +542,7 @@ export default function EnhancedConversationList({ conversations, tenantId, onRe
             tenantId={tenantId}
             onConversationUpdate={handleConversationUpdate}
             onRefreshNeeded={onRefreshNeeded}
+            authorizedUsers={authorizedUsers}
           />
         ))}
       </div>

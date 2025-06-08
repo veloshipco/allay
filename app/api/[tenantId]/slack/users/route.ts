@@ -58,6 +58,7 @@ export async function GET(
       isAdmin: user.isAdmin,
       isOwner: user.isOwner,
       timezone: user.timezone,
+      userToken: user.userToken ? 'present' : undefined,
       hasUserToken: !!user.userToken,
       tokenExpired: user.tokenExpiresAt ? new Date() > user.tokenExpiresAt : false,
       scopes: user.scopes || [],

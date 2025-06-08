@@ -245,48 +245,96 @@ export async function postMessage(
     username?: string
     iconUrl?: string
   } = {}
-): Promise<{ success: boolean; ts?: string; error?: string }> {
+): Promise<{ success: boolean; ts?: string; error?: string; usedUserToken?: boolean }> {
+  let attemptedUserToken = false
+  
   try {
-    const token = options.asUser && client.userToken ? client.userToken : client.botToken
-    
-    const body = new URLSearchParams({
+    // Try user token first if available and requested
+    if (options.asUser && client.userToken) {
+      attemptedUserToken = true
+      
+      const userBody = new URLSearchParams({
+        channel: channelId,
+        text: text
+      })
+
+      if (options.threadTs) {
+        userBody.append('thread_ts', options.threadTs)
+      }
+
+      try {
+        const userResponse = await fetch('https://slack.com/api/chat.postMessage', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${client.userToken}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: userBody
+        })
+
+        const userData = await userResponse.json()
+        
+        if (userData.ok) {
+          console.log('✅ Message posted successfully using user token')
+          return { success: true, ts: userData.ts, usedUserToken: true }
+        } else {
+          console.warn('⚠️ User token failed, falling back to bot token:', userData.error)
+          
+          // If user token fails, we'll fall through to bot token
+          if (userData.error === 'token_revoked' || userData.error === 'account_inactive') {
+            console.log('🔄 User token appears to be revoked or inactive')
+          }
+        }
+      } catch (userTokenError) {
+        console.warn('⚠️ User token request failed, falling back to bot token:', userTokenError)
+      }
+    }
+
+    // Fallback to bot token with attribution
+    const botBody = new URLSearchParams({
       channel: channelId,
       text: text
     })
 
     if (options.threadTs) {
-      body.append('thread_ts', options.threadTs)
+      botBody.append('thread_ts', options.threadTs)
     }
 
-    if (options.asUser && client.userToken) {
+    // Add attribution when using bot token
+    if (attemptedUserToken) {
       if (options.username) {
-        body.append('username', options.username)
+        botBody.append('username', options.username)
       }
       if (options.iconUrl) {
-        body.append('icon_url', options.iconUrl)
+        botBody.append('icon_url', options.iconUrl)
       }
     }
 
-    const response = await fetch('https://slack.com/api/chat.postMessage', {
+    const botResponse = await fetch('https://slack.com/api/chat.postMessage', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Bearer ${client.botToken}`,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body
+      body: botBody
     })
 
-    const data = await response.json()
+    const botData = await botResponse.json()
     
-    if (!data.ok) {
-      console.error('Error posting message:', data.error)
-      return { success: false, error: data.error }
+    if (!botData.ok) {
+      console.error('❌ Bot token also failed:', botData.error)
+      return { success: false, error: botData.error, usedUserToken: false }
     }
 
-    return { success: true, ts: data.ts }
+    const logMessage = attemptedUserToken 
+      ? '✅ Message posted using bot token (user token fallback)'
+      : '✅ Message posted using bot token'
+    console.log(logMessage)
+
+    return { success: true, ts: botData.ts, usedUserToken: false }
   } catch (error) {
-    console.error('Error posting message:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    console.error('❌ Error posting message:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error', usedUserToken: false }
   }
 }
 
@@ -345,6 +393,101 @@ export async function revokeSlackToken(botToken: string): Promise<boolean> {
     return true
   } catch (error) {
     console.error('Error revoking Slack token:', error)
+    return false
+  }
+}
+
+export async function revokeUserToken(tenantId: string, userId: string): Promise<boolean> {
+  try {
+    const dataSource = await initializeDatabase()
+    const slackUserRepository = dataSource.getRepository(SlackUser)
+    
+    const compositeId = `${tenantId}-${userId}`
+    const slackUser = await slackUserRepository.findOne({
+      where: { id: compositeId, tenantId, slackUserId: userId }
+    })
+
+    if (!slackUser?.userToken) {
+      console.log(`No user token found for user ${userId}`)
+      return true
+    }
+
+    // Revoke the token on Slack's side
+    try {
+      const response = await fetch('https://slack.com/api/auth.revoke', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${slackUser.userToken}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        }
+      })
+
+      const data = await response.json()
+      
+      if (!data.ok && data.error !== 'token_revoked') {
+        console.warn('Warning revoking user token on Slack side:', data.error)
+      }
+    } catch (revokeError) {
+      console.warn('Failed to revoke user token on Slack side, continuing with local cleanup:', revokeError)
+    }
+
+    // Clear the token from our database
+    slackUser.userToken = undefined
+    slackUser.scopes = undefined
+    slackUser.tokenExpiresAt = undefined
+    slackUser.isActive = true // Keep user record but remove token
+    
+    await slackUserRepository.save(slackUser)
+    
+    console.log(`Successfully cleaned up user token for ${userId}`)
+    return true
+  } catch (error) {
+    console.error('Error handling user token revocation:', error)
+    return false
+  }
+}
+
+export async function checkAndCleanupUserToken(tenantId: string, userId: string): Promise<boolean> {
+  try {
+    const dataSource = await initializeDatabase()
+    const slackUserRepository = dataSource.getRepository(SlackUser)
+    
+    const compositeId = `${tenantId}-${userId}`
+    const slackUser = await slackUserRepository.findOne({
+      where: { id: compositeId, tenantId, slackUserId: userId }
+    })
+
+    if (!slackUser?.userToken) {
+      return false
+    }
+
+    // Test the token with a simple API call
+    try {
+      const response = await fetch('https://slack.com/api/auth.test', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${slackUser.userToken}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        }
+      })
+
+      const data = await response.json()
+      
+      if (data.ok) {
+        return true // Token is valid
+      } else {
+        // Token is invalid, clean it up
+        console.log(`Invalid user token detected for ${userId}, cleaning up:`, data.error)
+        await revokeUserToken(tenantId, userId)
+        return false
+      }
+    } catch (testError) {
+      console.warn('Failed to test user token, assuming invalid:', testError)
+      await revokeUserToken(tenantId, userId)
+      return false
+    }
+  } catch (error) {
+    console.error('Error checking user token:', error)
     return false
   }
 } 

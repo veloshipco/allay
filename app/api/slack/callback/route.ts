@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { updateTenantSlackConfig } from '@/lib/tenant'
+import { initializeDatabase } from '@/lib/database/config'
+import { SlackUser } from '@/lib/database/entities/SlackUser'
+import { fetchUserInfo, createSlackClient } from '@/lib/slack-api'
 import { config } from 'dotenv'
 
 config({ path: '.env.local' })
@@ -58,6 +61,63 @@ export async function GET(req: NextRequest) {
 
     if (!data.ok) {
       throw new Error(`Slack OAuth error: ${data.error}`)
+    }
+
+    console.log('🔐 OAuth response received:', {
+      hasAccessToken: !!data.access_token,
+      hasAuthedUser: !!data.authed_user,
+      teamId: data.team?.id,
+      teamName: data.team?.name,
+      installedBy: data.authed_user?.id
+    })
+
+    // Store user token if available (when user scopes were granted)
+    if (data.authed_user && data.authed_user.access_token) {
+      try {
+        const dataSource = await initializeDatabase()
+        const slackUserRepository = dataSource.getRepository(SlackUser)
+        
+        const userId = data.authed_user.id
+        const userToken = data.authed_user.access_token
+        const userScopes = data.authed_user.scope ? data.authed_user.scope.split(',') : []
+        
+        // Create a temporary client to fetch user info
+        const tempClient = await createSlackClient(data.access_token)
+        const userProfile = await fetchUserInfo(tempClient, userId)
+        
+        if (userProfile) {
+          const compositeId = `${tenantId}-${userId}`
+          
+          // Create or update SlackUser with user token
+          const slackUser = slackUserRepository.create({
+            id: compositeId,
+            tenantId,
+            slackUserId: userId,
+            realName: userProfile.real_name,
+            displayName: userProfile.display_name,
+            email: userProfile.email,
+            profileImage: userProfile.image_72,
+            title: userProfile.title,
+            isBot: userProfile.is_bot,
+            isAdmin: userProfile.is_admin,
+            isOwner: userProfile.is_owner,
+            timezone: userProfile.tz,
+            userToken: userToken,
+            scopes: userScopes,
+            lastSeenAt: new Date()
+          })
+
+          await slackUserRepository.save(slackUser)
+          
+          console.log('💾 Stored user token for:', {
+            userId,
+            realName: userProfile.real_name,
+            scopes: userScopes
+          })
+        }
+      } catch (userTokenError) {
+        console.error('⚠️ Failed to store user token, but continuing with bot token:', userTokenError)
+      }
     }
 
     // Update tenant with Slack configuration including signing secret

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { processMessageEvent, processReactionEvent, processThreadReplyEvent, verifySlackSignature } from '@/lib/slack-events'
-import { addDebugEvent } from '@/app/api/debug/slack-events/route'
 
 export async function POST(req: NextRequest) {
   try {
@@ -61,8 +60,6 @@ export async function POST(req: NextRequest) {
     if (bodyData.event) {
       const event = bodyData.event
       
-      // Log event for debugging
-      addDebugEvent(event)
       
       switch (event.type) {
         case 'message':

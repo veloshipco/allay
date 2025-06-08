@@ -6,6 +6,8 @@ import { initializeDatabase } from '@/lib/database/config'
 import { Conversation } from '@/lib/database/entities/Conversation'
 import { SlackUser } from '@/lib/database/entities/SlackUser'
 import { SlackReaction, SlackMessage } from '@/lib/database/entities/types'
+import { Not, IsNull } from 'typeorm'
+import QuickMessageInterface from '@/components/quick-message-interface'
 
 interface PageProps {
   params: Promise<{ tenantId: string }>
@@ -184,10 +186,42 @@ export default async function ConversationsPage({ params }: PageProps) {
 
 async function ConversationsContent({ tenantId }: { tenantId: string }) {
   const initialConversations = await getInitialConversations(tenantId)
+  
+  // Fetch authorized users for messaging
+  const dataSource = await initializeDatabase()
+  const slackUserRepository = dataSource.getRepository(SlackUser)
+  const authorizedUsers = await slackUserRepository.find({
+    where: { 
+      tenantId,
+      userToken: Not(IsNull()),
+      isActive: true
+    },
+    select: {
+      id: true,
+      slackUserId: true,
+      realName: true,
+      displayName: true,
+      email: true,
+      profileImage: true
+    }
+  })
+  
+  const serializedAuthorizedUsers = authorizedUsers.map(user => ({
+    id: user.id,
+    slackUserId: user.slackUserId,
+    realName: user.realName,
+    displayName: user.displayName,
+    email: user.email,
+    profileImage: user.profileImage
+  }))
+  
   return (
-    <RealtimeConversations 
-      tenantId={tenantId} 
-      initialConversations={initialConversations}
-    />
+    <div className="space-y-6">
+      <QuickMessageInterface tenantId={tenantId} authorizedUsers={serializedAuthorizedUsers} />
+      <RealtimeConversations 
+        tenantId={tenantId} 
+        initialConversations={initialConversations}
+      />
+    </div>
   )
 } 

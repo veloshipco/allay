@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { MessageSquare, Home, MessageCircle, Settings, Zap, LogOut } from 'lucide-react'
+import { MessageSquare, Home, MessageCircle, Settings, Zap, LogOut, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 interface TenantNavProps {
@@ -52,6 +52,12 @@ export function TenantNav({ tenantId }: TenantNavProps) {
       label: 'Conversations',
       icon: MessageCircle,
       isActive: pathname.startsWith(`/${tenantId}/conversations`)
+    },
+    {
+      href: `/${tenantId}/users`,
+      label: 'Users',
+      icon: Users,
+      isActive: pathname.startsWith(`/${tenantId}/users`)
     },
     {
       href: `/${tenantId}/integrations`,
