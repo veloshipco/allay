@@ -18,17 +18,35 @@ export async function GET(
   }
   
   const scopes = [
+    // Core reading permissions
     'channels:read',
     'groups:read',
     'im:read',
     'mpim:read',
     'reactions:read',
-    'chat:write',
     'team:read',
+    
+    // Message history permissions
     'channels:history',
     'groups:history',
     'im:history',
-    'mpim:history'
+    'mpim:history',
+    
+    // Writing permissions
+    'chat:write',
+    'reactions:write',
+    
+    // Channel management
+    'channels:join',
+    'groups:write',
+    
+    // User information
+    'users:read',
+    'users:read.email',
+    
+    // Enhanced user interaction (requires user to install/authorize)
+    'chat:write.public',
+    'chat:write.customize'
   ]
 
   // Use the ngrok URL as the base URL
@@ -40,6 +58,7 @@ export async function GET(
   }&scope=${scopes.join(',')}&redirect_uri=${encodeURIComponent(redirectUrl.toString())}&state=${encodeURIComponent(tenantId)}`
 
   console.log('🔗 Redirecting to Slack OAuth URL:', url)
+  console.log('📝 Requested scopes:', scopes.join(', '))
   
   return NextResponse.redirect(url)
 } 

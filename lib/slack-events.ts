@@ -1,6 +1,8 @@
 import crypto from 'crypto'
 import { initializeDatabase } from './database/config'
 import { Conversation, SlackMessage } from './database/entities/Conversation'
+import { createSlackClient, getOrCreateSlackUser, fetchChannelInfo } from './slack-api'
+import { getTenantContext } from './tenant'
 
 interface SlackEvent {
   ts: string
@@ -82,16 +84,33 @@ export async function processMessageEvent(tenantId: string, event: SlackEvent) {
       return // Message already processed
     }
 
+    // Get tenant context and create Slack client
+    const { tenant } = await getTenantContext(tenantId)
+    if (!tenant?.slackConfig?.botToken) {
+      console.error('❌ No bot token found for tenant:', tenantId)
+      return
+    }
+
+    const slackClient = await createSlackClient(tenant.slackConfig.botToken)
+
+    // Resolve user information
+    console.log('👤 Resolving user information...')
+    const slackUser = await getOrCreateSlackUser(tenantId, event.user, slackClient)
+    
+    // Get channel information
+    console.log('📺 Fetching channel information...')
+    const channelInfo = await fetchChannelInfo(slackClient, event.channel)
+
     console.log('✨ Creating new conversation record...')
-    // Create new conversation record
+    // Create new conversation record with enhanced user and channel data
     const conversation = conversationRepository.create({
       id: event.ts,
       tenantId,
       channelId: event.channel,
-      channelName: event.channel_name || undefined,
+      channelName: channelInfo?.name || event.channel_name || undefined,
       content: event.text || '',
       userId: event.user,
-      userName: event.username || undefined,
+      userName: slackUser?.realName || slackUser?.displayName || event.username || undefined,
       threadTs: event.thread_ts || undefined,
       slackTimestamp: new Date(parseFloat(event.ts) * 1000),
       reactions: [],
@@ -102,7 +121,9 @@ export async function processMessageEvent(tenantId: string, event: SlackEvent) {
       id: conversation.id,
       tenantId: conversation.tenantId,
       channelId: conversation.channelId,
-      content: conversation.content
+      channelName: conversation.channelName,
+      userName: conversation.userName,
+      content: conversation.content.substring(0, 50) + '...'
     })
 
     console.log('💾 Saving to database...')
@@ -110,9 +131,7 @@ export async function processMessageEvent(tenantId: string, event: SlackEvent) {
     console.log(`✅ Successfully saved message ${event.ts} for tenant ${tenantId}`)
   } catch (error) {
     console.error('💥 Error processing message event:', error)
-    if (error instanceof Error) {
-      console.error('Stack trace:', error.stack)
-    }
+    throw error
   }
 }
 
@@ -129,6 +148,14 @@ export async function processReactionEvent(tenantId: string, event: SlackReactio
     if (!conversation) {
       console.log(`Conversation ${event.item.ts} not found for reaction event`)
       return
+    }
+
+    // Get tenant context for user resolution
+    const { tenant } = await getTenantContext(tenantId)
+    if (tenant?.slackConfig?.botToken) {
+      const slackClient = await createSlackClient(tenant.slackConfig.botToken)
+      // Ensure the reacting user is tracked
+      await getOrCreateSlackUser(tenantId, event.user, slackClient)
     }
 
     // Update reactions
@@ -189,6 +216,16 @@ export async function processThreadReplyEvent(tenantId: string, event: SlackEven
       return
     }
 
+    // Get tenant context and resolve user information
+    const { tenant } = await getTenantContext(tenantId)
+    let userName: string | undefined
+    
+    if (tenant?.slackConfig?.botToken) {
+      const slackClient = await createSlackClient(tenant.slackConfig.botToken)
+      const slackUser = await getOrCreateSlackUser(tenantId, event.user, slackClient)
+      userName = slackUser?.realName || slackUser?.displayName || event.username
+    }
+
     // Add thread reply
     const threadReply: SlackMessage = {
       ts: event.ts,
@@ -211,7 +248,7 @@ export async function processThreadReplyEvent(tenantId: string, event: SlackEven
     parentConversation.threadReplies = threadReplies
     
     await conversationRepository.save(parentConversation)
-    console.log(`Added thread reply ${event.ts} to conversation ${event.thread_ts} in tenant ${tenantId}`)
+    console.log(`Added thread reply ${event.ts} to conversation ${event.thread_ts} in tenant ${tenantId} (user: ${userName})`)
   } catch (error) {
     console.error('Error processing thread reply event:', error)
   }
