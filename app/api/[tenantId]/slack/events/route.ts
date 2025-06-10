@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantContext } from '@/lib/tenant'
-import { processMessageEvent, processReactionEvent, processThreadReplyEvent, verifySlackSignature } from '@/lib/slack-events'
+import { processMessageEvent, processReactionEvent, processThreadReplyEvent, verifySlackSignature, processAppUninstalledEvent, processTokensRevokedEvent } from '@/lib/slack-events'
 
 export async function POST(
   req: NextRequest,
@@ -58,6 +58,16 @@ export async function POST(
           
         case 'reaction_removed':
           await processReactionEvent(tenantId, event, true)
+          break
+          
+        case 'app_uninstalled':
+          console.log(`🚫 App uninstalled event received for tenant: ${tenantId}`)
+          await processAppUninstalledEvent(tenantId)
+          break
+          
+        case 'tokens_revoked':
+          console.log(`🔒 Tokens revoked event received for tenant: ${tenantId}`)
+          await processTokensRevokedEvent(tenantId, event.tokens || {})
           break
           
         default:

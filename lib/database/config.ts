@@ -4,6 +4,8 @@ import { Conversation } from './entities/Conversation'
 import { User } from './entities/User'
 import { Session } from './entities/Session'
 import { SlackUser } from './entities/SlackUser'
+import { OrganizationMember } from './entities/OrganizationMember'
+import { OrganizationInvitation } from './entities/OrganizationInvitation'
 import dotenv from 'dotenv'
 
 dotenv.config({ path: '.env.local' })
@@ -19,7 +21,7 @@ export const AppDataSource = new DataSource({
   ssl: process.env.DATABASE_HOST?.includes('supabase.co') ? { rejectUnauthorized: false } : false,
   synchronize: process.env.NODE_ENV === 'development',
   logging: process.env.NODE_ENV === 'development',
-  entities: [Tenant, Conversation, User, Session, SlackUser],
+  entities: [Tenant, Conversation, User, Session, SlackUser, OrganizationMember, OrganizationInvitation],
   migrations: ['lib/database/migrations/*.ts'],
   subscribers: ['lib/database/subscribers/*.ts']
 })

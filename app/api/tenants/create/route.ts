@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession, addUserToTenant } from '@/lib/auth'
 import { createTenant } from '@/lib/tenant'
+import { addMemberToOrganization, OrganizationRole } from '@/lib/organization'
 
 export async function POST(req: NextRequest) {
   try {
@@ -57,6 +58,18 @@ export async function POST(req: NextRequest) {
         { error: 'Failed to associate user with tenant' },
         { status: 500 }
       )
+    }
+
+    // Add user as organization owner
+    const ownerResult = await addMemberToOrganization(
+      sessionData.user.id, 
+      tenant.id, 
+      OrganizationRole.OWNER
+    )
+    
+    if (!ownerResult.success) {
+      console.error('Failed to add user as organization owner:', ownerResult.error)
+      // Don't fail the tenant creation, but log the error
     }
 
     return NextResponse.json({

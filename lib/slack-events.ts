@@ -297,4 +297,120 @@ export async function processThreadReplyEvent(tenantId: string, event: SlackEven
   } catch (error) {
     console.error('Error processing thread reply event:', error)
   }
+}
+
+export async function processAppUninstalledEvent(tenantId: string) {
+  console.log(`🚫 Processing app uninstall event for tenant: ${tenantId}`)
+  
+  try {
+    const dataSource = await initializeDatabase()
+    const conversationRepository = dataSource.getRepository(Conversation)
+    const slackUserRepository = dataSource.getRepository('SlackUser')
+
+    // Find the tenant
+    const tenant = await dataSource.getRepository('Tenant').findOne({ 
+      where: { id: tenantId, isActive: true } 
+    })
+
+    if (!tenant || !tenant.slackConfig) {
+      console.log(`⚠️ Tenant ${tenantId} not found or not configured for Slack`)
+      return
+    }
+
+    console.log(`🧹 Starting cleanup for tenant: ${tenantId}`)
+
+    // Clear ALL Slack-related data
+    try {
+      // Delete all conversations for this tenant
+      const deletedConversations = await conversationRepository.delete({ tenantId })
+      console.log(`🗑️ Deleted ${deletedConversations.affected || 0} conversations for tenant: ${tenantId}`)
+      
+      // Delete all slack users for this tenant
+      const deletedUsers = await slackUserRepository.delete({ tenantId })
+      console.log(`🗑️ Deleted ${deletedUsers.affected || 0} Slack users for tenant: ${tenantId}`)
+    } catch (error) {
+      console.error('❌ Error clearing Slack data:', error)
+      // Continue with config clearing even if data deletion fails
+    }
+
+    // Clear Slack configuration from tenant
+    try {
+      // Use raw SQL query to ensure the slackConfig is properly cleared
+      await dataSource.query(
+        'UPDATE tenants SET "slackConfig" = NULL WHERE id = $1',
+        [tenantId]
+      )
+      
+      // Verify the update
+      const verifiedTenant = await dataSource.getRepository('Tenant').findOne({ 
+        where: { id: tenantId },
+        cache: false
+      })
+      
+      if (verifiedTenant?.slackConfig) {
+        throw new Error('Database update failed - slackConfig still exists')
+      }
+      
+      console.log(`✅ Successfully cleared Slack configuration for tenant: ${tenantId}`)
+    } catch (saveError) {
+      console.error('❌ Error clearing tenant configuration:', saveError)
+      throw saveError
+    }
+
+    // Broadcast real-time update about disconnection
+    await broadcastToSSE(tenantId, 'app_uninstalled', {
+      message: 'Slack app has been uninstalled from your workspace'
+    })
+
+    console.log(`✅ Successfully processed app uninstall for tenant: ${tenantId}`)
+  } catch (error) {
+    console.error('❌ Error processing app uninstall event:', error)
+    throw error
+  }
+}
+
+export async function processTokensRevokedEvent(tenantId: string, tokens: { oauth?: string[]; bot?: string[] }) {
+  console.log(`🔒 Processing tokens revoked event for tenant: ${tenantId}`, tokens)
+  
+  try {
+    const dataSource = await initializeDatabase()
+    const slackUserRepository = dataSource.getRepository('SlackUser')
+
+    // If bot token is revoked, clear everything
+    if (tokens.bot && tokens.bot.length > 0) {
+      console.log(`🤖 Bot token revoked, performing full cleanup for tenant: ${tenantId}`)
+      await processAppUninstalledEvent(tenantId)
+      return
+    }
+
+    // If only OAuth tokens are revoked, clean up user tokens
+    if (tokens.oauth && tokens.oauth.length > 0) {
+      console.log(`👥 User tokens revoked for tenant: ${tenantId}`)
+      
+      // Import TypeORM operators
+      const { Not, IsNull } = await import('typeorm')
+      
+      // Clear all user tokens for this tenant
+      const slackUsers = await slackUserRepository.find({
+        where: { tenantId, userToken: Not(IsNull()) }
+      })
+
+      for (const slackUser of slackUsers) {
+        slackUser.userToken = undefined
+        slackUser.scopes = undefined
+        slackUser.tokenExpiresAt = undefined
+        await slackUserRepository.save(slackUser)
+      }
+
+      console.log(`🧹 Cleared ${slackUsers.length} user tokens for tenant: ${tenantId}`)
+      
+      // Broadcast update about user token revocation
+      await broadcastToSSE(tenantId, 'user_tokens_revoked', {
+        message: 'User authorization tokens have been revoked'
+      })
+    }
+  } catch (error) {
+    console.error('❌ Error processing tokens revoked event:', error)
+    throw error
+  }
 } 

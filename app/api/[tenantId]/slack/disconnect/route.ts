@@ -66,9 +66,11 @@ export async function POST(
 
     // Step 3: Completely clear Slack configuration from tenant
     try {
-      // Clear the slackConfig completely
-      tenant.slackConfig = undefined
-      await tenantRepository.save(tenant)
+      // Use raw SQL query to ensure the slackConfig is properly cleared
+      await dataSource.query(
+        'UPDATE tenants SET "slackConfig" = NULL WHERE id = $1',
+        [tenantId]
+      )
       
       // Verify the update by fetching fresh copy from database
       const verifiedTenant = await tenantRepository.findOne({ 
@@ -77,9 +79,11 @@ export async function POST(
       })
       
       if (verifiedTenant?.slackConfig) {
+        console.error('Database verification failed - slackConfig still exists:', verifiedTenant.slackConfig)
         throw new Error('Database update failed - slackConfig still exists')
       }
       
+      console.log(`✅ Successfully cleared Slack configuration for tenant: ${tenantId}`)
     } catch (saveError) {
       console.error('Error clearing tenant configuration:', saveError)
       throw saveError
